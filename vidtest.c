@@ -10,6 +10,9 @@
 
 uint8_t *buffer;
 
+// 对ioctl的封装
+// 当-1 == r && EINTR == errno时重试
+// 与capture.c中完全一致
 static int xioctl(int fd, int request, void *arg) {
   int r;
 
@@ -20,6 +23,9 @@ static int xioctl(int fd, int request, void *arg) {
   return r;
 }
 
+// 打印capabilities信息
+// 先是capability，然后是cropcap
+// 接着查询了pixelformat，然后设置了pixelformat
 int print_caps(int fd) {
   struct v4l2_capability caps = {};
   if (-1 == xioctl(fd, VIDIOC_QUERYCAP, &caps)) {
@@ -54,6 +60,7 @@ int print_caps(int fd) {
 
   int support_grbg10 = 0;
 
+  // 查询了所有pixelformat，并做了是否支持grbg10的判断
   struct v4l2_fmtdesc fmtdesc = {0};
   fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   char fourcc[5] = {0};
@@ -69,16 +76,16 @@ int print_caps(int fd) {
     fmtdesc.index++;
   }
 
-  if (!support_grbg10) {
-    printf("Doesn't support GRBG10.\n");
-    return 1;
-  }
+  // if (!support_grbg10) {
+  //   printf("Doesn't support GRBG10.\n");
+  //   return 1;
+  // }
 
   struct v4l2_format fmt = {0};
   fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   fmt.fmt.pix.width = 752;
   fmt.fmt.pix.height = 480;
-  fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_SGRBG10;
+  fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
   fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
   if (-1 == xioctl(fd, VIDIOC_S_FMT, &fmt)) {
@@ -96,6 +103,7 @@ int print_caps(int fd) {
   return 0;
 }
 
+// 初始化mmap内存映射，用于获取数据
 int init_mmap(int fd) {
   struct v4l2_requestbuffers req = {0};
   req.count = 1;
@@ -155,7 +163,12 @@ int capture_image(int fd) {
     return 1;
   }
 
-  int outfd = open("out.img", O_RDWR);
+  int outfd = open("img.jpg", O_WRONLY | O_CREAT | O_EXCL, 0600);
+  if ((outfd == -1) && (EEXIST == errno)) {
+    /* open the existing file with write flag */
+    outfd = open("img.jpg", O_WRONLY);
+  }
+
   write(outfd, buffer, buf.bytesused);
   close(outfd);
 
@@ -165,7 +178,7 @@ int capture_image(int fd) {
 int main() {
   int fd;
 
-  fd = open("/dev/video0", O_RDWR);
+  fd = open("/dev/video1", O_RDWR);
   if (fd == -1) {
     perror("Opening video device");
     return 1;
